@@ -1,0 +1,173 @@
+1 Train a full floating-point model.
+
+/tf/AIstick/AI/release_2801/train/2801_vgg-16_train_float.prototxt
+...
+source: "/root/Downloads/deeplearning-cats-dogs-tutorial/input/train_lmdb"
+...
+source: "/root/Downloads/deeplearning-cats-dogs-tutorial/input/validation_lmdb"
+...
+layer {
+  name: "fc8"
+  type: "InnerProduct"
+  bottom: "fc7"
+  top: "fc8"
+  inner_product_param {
+    num_output: 2
+  }
+}
+
+
+nano /tf/AIstick/AI/release_2801/train/scripts/solver.prototxt
+net: "/tf/AIstick/AI/release_2801/train/2801_vgg-16_train_float.prototxt"
+test_iter: 100
+test_interval: 100
+base_lr: 0.001
+lr_policy: "step"
+gamma: 0.95
+stepsize: 1000
+display: 100
+max_iter: 100
+momentum: 0.9
+weight_decay: 0.0002
+snapshot: 100
+snapshot_prefix: "models/snapshot"
+solver_mode: GPU
+
+mkdir models/snapshot/
+
+/tf/AIstick/AI/caffe_ssd/build/tools/caffe train --solver=solver.prototxt -gpu 0 2>&1  | tee log_float_vgg.log
+
+mkdir models/1
+
+mv models/snapshot/snapshot_iter_100.* models/1/
+_______________________________________________________________________________
+2 Fine-tune resulting model from (1) with GTI custom quantized convolutional layers.
+
+cp /tf/AIstick/AI/release_2801/train/2801_vgg-16_train_float.prototxt  2801_vgg-16_quant_conv_train_float.prototxt
+change file 2801_vgg-16_quant_conv_train_float.prototxt 
+59:    coef_precision: THREE_BITS
+95:    coef_precision: THREE_BITS
+142:    coef_precision: THREE_BITS
+178:    coef_precision: THREE_BITS
+225:    coef_precision: THREE_BITS
+261:    coef_precision: THREE_BITS
+297:    coef_precision: THREE_BITS
+344:    coef_precision: ONE_BIT
+380:    coef_precision: ONE_BIT
+416:    coef_precision: ONE_BIT
+463:    coef_precision: ONE_BIT
+499:    coef_precision: ONE_BIT
+535:    coef_precision: ONE_BIT
+
+
+nano /tf/AIstick/AI/release_2801/train/scripts/solver.prototxt
+net: "/tf/AIstick/AI/release_2801/train/2801_vgg-16_quant_conv_train_float.prototxt"
+...
+/build/tools/caffe train --solver=solver.prototxt --weights=/tf/AIstick/AI/release_2801/train/scripts/models/1/snapshot_iter_100.caffemodel -gpu 0 | tee log_float__quant_conv_vgg.log
+
+mkdir models/2
+mv models/snapshot/snapshot_iter_100.* models/2/
+
+_______________________________________________________________________________
+3 Fine-tune resulting model from (2) with GTI custom quantized activation layers.
+nano train/scripts/CalibrateQuantReLU.py
+...
+prototxt = "/tf/AIstick/AI/release_2801/train/2801_vgg-16_quant_conv_train_float.prototxt"  
+model = "/tf/AIstick/AI/release_2801/train/scripts/models/2/snapshot_iter_100.caffemodel" 
+...
+
+python CalibrateQuantReLU.py # will generate a new train/2801_vgg-16_quant_conv_train_float_QuantReLU.prototxt and models/2/snapshot_iter_100_QuantReLU.caffemodel
+
+nano /tf/AIstick/AI/release_2801/train/scripts/solver.prototxt
+net: "/tf/AIstick/AI/release_2801/train/2801_vgg-16_quant_conv_train_float_QuantReLU.prototxt"
+...
+
+build/tools/caffe train --solver=solver.prototxt --weights=/tf/AIstick/AI/release_2801/train/scripts/models/2/snapshot_iter_100.caffemodel -gpu 0 | tee log_float__quantRelu_vgg.log
+
+mkdir models/3
+mv models/snapshot/snapshot_iter_100.* models/3/
+_______________________________________________________________________________
+4 Perform model “fusion” and fine-tune resulting model 
+
+nano train/scripts/RefineNetwork.py
+...
+prototxt = '/tf/AIstick/AI/release_2801/train/2801_vgg-16_quant_conv_train_float_QuantReLU.prototxt' 
+model = '/tf/AIstick/AI/release_2801/train/scripts/models/3/snapshot_iter_100.caffemodel' 
+...
+prototxt_refined = 'vgg16_quantConv_train_quantRelu_refined.prototxt' # prototxt after network refinement
+model_refined = 'snapshot_iter_100_refined.caffemodel'  # caffemodel after network refinement
+...
+
+python RefineNetwork.py
+
+mkdir scripts/4.1
+mv scripts/snapshot_iter_100_refined.caffemodel scripts/vgg16_quantConv_train_quantRelu_refined.prototxt scripts/4.1/
+
+
+nano /tf/AIstick/AI/release_2801/train/scripts/solver.prototxt
+net: "/tf/AIstick/AI/release_2801/train/scripts/4.1/vgg16_quantConv_train_quantRelu_refined.prototxt"
+...
+
+/tf/AIstick/AI/caffe/build/tools/caffe train --solver=solver.prototxt --weights=/tf/AIstick/AI/release_2801/train/scripts/models/4.1/snapshot_iter_100_refined.caffemodel -gpu 0 | tee log_refined_vgg.log
+
+
+mkdir models/4.2
+mv models/snapshot_iter_100.* models/4.2/ ????????
+cd 4.1/
+cp vgg16_quantConv_train_quantRelu_refined.prototxt vgg16_quantConv_train_quantRelu_refined_deploy.prototxt
+(NB see train/2801_vgg-16_deploy.prototxt)
+nano 4.1/vgg16_quantConv_train_quantRelu_refined_deploy.prototxt 
+name: "2801_VGG-16_train_float"
+layer {
+  name: "input"
+  type: "Input"
+  top: "data"
+  input_param {
+    shape {
+      dim: 1
+      dim: 3
+      dim: 224
+      dim: 224
+    }
+  }
+}
+layer {
+  name: "conv1_1"
+.......
+layer {
+  name: "fc8"
+  type: "InnerProduct"
+  bottom: "fc7"
+  top: "fc8"
+  inner_product_param {
+    num_output: 2
+  }
+}
+layer {
+  name: "prob"
+  type: "Softmax"
+  bottom: "fc9"
+  top: "prob"
+}
+
+nano conversion_tool/network_examples/2801/fullmodel_def2801_vgg-16_template.json
+55c55
+<             "output channels": 6,
+---
+>             "output channels": 1000,
+64c64
+<             "output channels": 6,
+---
+>             "output channels": 1000,
+73 ??????????/
+
+mkdir conversion_tool/vgg/
+cp train/scripts/models/4.2/snapshot_iter_100.caffemodel conversion_tool/vgg/
+cp train/scripts/4.1/vgg16_quantConv_train_quantRelu_refined_deploy.prototxt conversion_tool/vgg/
+nano conversion_tool/vgg/labels.txt (https://raw.githubusercontent.com/davidgengenbach/vgg-caffe/master/data/labels.txt)
+
+sudo chmod 777 -R conversion_tool/
+cd conversion_tool/
+python convert.py vgg/vgg16_quantConv_train_quantRelu_refined_deploy.prototxt vgg/snapshot_iter_100.caffemodel network_examples/2801/network2801_vgg-16_template.json network_examples/2801/fullmodel_def2801_vgg-16_template.json --label=vgg/labels.txt
+
+RESULT in output folder!!!
