@@ -1,10 +1,11 @@
 ## CAFFE_VGG-SSD的训练流程样例 (5801)
 
 ```tex
-1.face.tar.gz是数据集
+1.face.tar.gz is the dataset
 2.caffe-ssd.tar.gz是caffe-ssd的包
-3.在caffe_MDK里面安装的文件夹里面的readme.txt文件，里面需要替换的data_transformer.cpp使用这个文件夹里面给的，MDK里面给的data_transformer.cpp是针对caffe-1.0的。
-4.SSD_face_iter_77681.caffemodel是预训练模型
+3.在caffe_MDK inside the installed folder readme.txt file, which needs to be replaced 
+data_transformer.cpp Use the given in this folder，MDKgiven in data_transformer.cpp is directed at caffe-1.0的。
+4.SSD_face_iter_77681.caffemodel是预训练模型 
 5. VGG_SSD_224_5801_test.prototxt是测试的prototxt
    VGG_SSD_224_5801_train_quant.prototxt是训练的prototxt
    上面的两个文件在solver_face.prototxt里面指定
